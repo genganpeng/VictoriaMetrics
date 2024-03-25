@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cespare/xxhash/v2"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vminsert/relabel"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/auth"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
@@ -12,18 +14,19 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/httpserver"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
-	"github.com/cespare/xxhash/v2"
 )
 
 // InsertCtx is a generic context for inserting data.
 //
 // InsertCtx.Reset must be called before the first usage.
 type InsertCtx struct {
-	snb           *storageNodesBucket
-	Labels        sortedLabels
+	snb    *storageNodesBucket
+	Labels sortedLabels
+	// 使用 accountID、projectID、labels(处理不符合要求的label，比如name和value length) 信息拼接在一起，压缩信息成 MetricNameBuf
 	MetricNameBuf []byte
 
-	bufRowss  []bufRows
+	bufRowss []bufRows
+	// 使用 accountID、projectID、labels信息拼接在一起，压缩信息成 labelsBuf
 	labelsBuf []byte
 
 	relabelCtx relabel.Ctx
@@ -120,7 +123,9 @@ func (ctx *InsertCtx) ApplyRelabeling() {
 
 // WriteDataPoint writes (timestamp, value) data point with the given at and labels to ctx buffer.
 func (ctx *InsertCtx) WriteDataPoint(at *auth.Token, labels []prompb.Label, timestamp int64, value float64) error {
+	// 使用 accountID、projectID、labels(处理不符合要求的label，比如name和value length) 信息拼接在一起，压缩信息成 MetricNameBuf
 	ctx.MetricNameBuf = storage.MarshalMetricNameRaw(ctx.MetricNameBuf[:0], at.AccountID, at.ProjectID, labels)
+
 	storageNodeIdx := ctx.GetStorageNodeIdx(at, labels)
 	return ctx.WriteDataPointExt(storageNodeIdx, ctx.MetricNameBuf, timestamp, value)
 }
@@ -165,6 +170,7 @@ func (ctx *InsertCtx) FlushBufs() error {
 //
 // The returned index must be passed to WriteDataPoint.
 func (ctx *InsertCtx) GetStorageNodeIdx(at *auth.Token, labels []prompb.Label) int {
+	// 只有一个节点直接返回这个节点
 	if len(ctx.snb.sns) == 1 {
 		// Fast path - only a single storage node.
 		return 0

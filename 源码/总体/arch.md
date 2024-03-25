@@ -10,7 +10,8 @@ main.go直接启动，数据目录在本工程目录下
 -storageNode=:8400
 ```
 ## 源码
-
+![2](2.png)
+2个字节长的为0指的是__name__
 # vmagent
 启动参数
 ```shell

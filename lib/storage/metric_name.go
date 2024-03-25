@@ -575,6 +575,7 @@ func SetMaxLabelsPerTimeseries(maxLabels int) {
 func MarshalMetricNameRaw(dst []byte, accountID, projectID uint32, labels []prompb.Label) []byte {
 	// Calculate the required space for dst.
 	dstLen := len(dst)
+	// 申请8个字节用于存放accountID（32位 uint，4个字节）、projectID（32位 uint，4个字节）
 	dstSize := dstLen + 8
 	for i := range labels {
 		if i >= maxLabelsPerTimeseries {
@@ -597,14 +598,21 @@ func MarshalMetricNameRaw(dst []byte, accountID, projectID uint32, labels []prom
 		if string(label.Name) == "__name__" {
 			label.Name = label.Name[:0]
 		}
+		// 申请存放label.Name的值的长度
 		dstSize += len(label.Name)
+		// 申请存放label.Value的值的长度
 		dstSize += len(label.Value)
+		// 申请4个长度用于存放记录label.Name长度（16位 uint，2个字节，label.Name有长度限制，不会超过16位uint，
+		// 超过会取前面16位uint长度内容）、记录label.Value的长度（16位 uint，2个字节，label.Value有长度限制，
+		// 不会超过16位uint，超过会取前面16位uint长度内容）
 		dstSize += 4
 	}
 	dst = bytesutil.ResizeWithCopyMayOverallocate(dst, dstSize)[:dstLen]
 
 	// Marshal labels to dst.
+	// 存accountID
 	dst = encoding.MarshalUint32(dst, accountID)
+	// 存projectID
 	dst = encoding.MarshalUint32(dst, projectID)
 	for i := range labels {
 		if i >= maxLabelsPerTimeseries {
@@ -615,7 +623,9 @@ func MarshalMetricNameRaw(dst []byte, accountID, projectID uint32, labels []prom
 			// Skip labels without values, since they have no sense in prometheus.
 			continue
 		}
+		// 先计算label.Name长度，存label.Name的长度（2个字节），再存label.Name的值
 		dst = marshalStringFast(dst, label.Name)
+		// 先计算label.Value长度，存label.Value的长度（2个字节），再存label.Name的值
 		dst = marshalStringFast(dst, label.Value)
 	}
 	return dst

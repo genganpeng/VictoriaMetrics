@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fasttime"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/procutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompbmarshal"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 var (
@@ -141,8 +142,9 @@ func (ctx *Ctx) ApplyRelabeling(labels []prompb.Label) []prompb.Label {
 	}
 
 	if pcs.Len() > 0 {
-		// Apply relabeling
+		// Apply relabeling 根据定义relabel
 		tmpLabels = pcs.Apply(tmpLabels, 0)
+		// 删除以__ 开头的标签
 		tmpLabels = promrelabel.FinalizeLabels(tmpLabels[:0], tmpLabels)
 		if len(tmpLabels) == 0 {
 			metricsDropped.Inc()

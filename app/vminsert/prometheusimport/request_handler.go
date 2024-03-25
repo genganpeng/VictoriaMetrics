@@ -52,15 +52,19 @@ func insertRows(at *auth.Token, rows []parser.Row, extraLabels []prompbmarshal.L
 	for i := range rows {
 		r := &rows[i]
 		ctx.Labels = ctx.Labels[:0]
+		// 指标名的label名为空字符串
 		ctx.AddLabel("", r.Metric)
+		// 获取数据中标签
 		for j := range r.Tags {
 			tag := &r.Tags[j]
 			ctx.AddLabel(tag.Key, tag.Value)
 		}
+		// 获取请求中额外的标签
 		for j := range extraLabels {
 			label := &extraLabels[j]
 			ctx.AddLabel(label.Name, label.Value)
 		}
+		// relabel
 		if hasRelabeling {
 			ctx.ApplyRelabeling()
 		}
@@ -69,6 +73,7 @@ func insertRows(at *auth.Token, rows []parser.Row, extraLabels []prompbmarshal.L
 			continue
 		}
 		ctx.SortLabelsIfNeeded()
+		// 如果at为nil，则获取标签中租户信息
 		atLocal := ctx.GetLocalAuthToken(at)
 		if err := ctx.WriteDataPoint(atLocal, ctx.Labels, r.Timestamp, r.Value); err != nil {
 			return err
