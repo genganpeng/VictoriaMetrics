@@ -7,12 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/common"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/prometheus"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/writeconcurrencylimiter"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 // Parse parses lines with Prometheus exposition format from r and calls callback for the parsed rows.
@@ -25,6 +26,8 @@ import (
 // It is recommended setting limitConcurrency=true if the caller doesn't have concurrency limits set,
 // like /api/v1/write calls.
 func Parse(r io.Reader, defaultTimestamp int64, isGzipped, limitConcurrency bool, callback func(rows []prometheus.Row) error, errLogger func(string)) error {
+	// 优化点： 中型对象的分配和释放相对不是很频繁，因此使用sync.Pool来作为对象池，就可以重用这些对象。 中型对象提供了reset()方法，
+	// 把缓冲区的开始位置置0，而不是解除引用。中型对象相关的所有成员都只会分配一次，然后不再释放。
 	if limitConcurrency {
 		wcr := writeconcurrencylimiter.GetReader(r)
 		defer writeconcurrencylimiter.PutReader(wcr)
@@ -41,6 +44,7 @@ func Parse(r io.Reader, defaultTimestamp int64, isGzipped, limitConcurrency bool
 	}
 	ctx := getStreamContext(r)
 	defer putStreamContext(ctx)
+	// 不断读取数据
 	for ctx.Read() {
 		uw := getUnmarshalWork()
 		uw.errLogger = errLogger
@@ -49,6 +53,7 @@ func Parse(r io.Reader, defaultTimestamp int64, isGzipped, limitConcurrency bool
 		uw.defaultTimestamp = defaultTimestamp
 		uw.reqBuf, ctx.reqBuf = ctx.reqBuf, uw.reqBuf
 		ctx.wg.Add(1)
+		// 通过channel异步处理反序列化， 参见StartUnmarshalWorkers启动异步处理工作
 		common.ScheduleUnmarshalWork(uw)
 		if wcr, ok := r.(*writeconcurrencylimiter.Reader); ok {
 			wcr.DecConcurrency()
@@ -68,6 +73,7 @@ func (ctx *streamContext) Read() bool {
 	}
 	ctx.reqBuf, ctx.tailBuf, ctx.err = common.ReadLinesBlock(ctx.br, ctx.reqBuf, ctx.tailBuf)
 	if ctx.err != nil {
+		// EOF通过错误返回
 		if ctx.err != io.EOF {
 			readErrors.Inc()
 			ctx.err = fmt.Errorf("cannot read Prometheus exposition data: %w", ctx.err)
@@ -145,6 +151,7 @@ func putStreamContext(ctx *streamContext) {
 var streamContextPool sync.Pool
 var streamContextPoolCh = make(chan *streamContext, cgroup.AvailableCPUs())
 
+// 负责反序列化的工作
 type unmarshalWork struct {
 	rows             prometheus.Rows
 	ctx              *streamContext
@@ -177,6 +184,7 @@ func (uw *unmarshalWork) runCallback(rows []prometheus.Row) {
 
 // Unmarshal implements common.UnmarshalWork
 func (uw *unmarshalWork) Unmarshal() {
+	//
 	if uw.errLogger != nil {
 		uw.rows.UnmarshalWithErrLogger(bytesutil.ToUnsafeString(uw.reqBuf), uw.errLogger)
 	} else {

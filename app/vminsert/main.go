@@ -214,6 +214,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) bool {
 		// This is not our link.
 		return false
 	}
+	// 解析获取租户信息
 	at, err := auth.NewTokenPossibleMultitenant(p.AuthToken)
 	if err != nil {
 		httpserver.Errorf(w, r, "auth error: %s", err)
@@ -242,6 +243,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) bool {
 		p.Suffix = strings.TrimSuffix(p.Suffix, "/")
 	}
 	switch p.Suffix {
+	// promethues格式数据写入
 	case "prometheus/", "prometheus", "prometheus/api/v1/write":
 		if common.HandleVMProtoServerHandshake(w, r) {
 			return true

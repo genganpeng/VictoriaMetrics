@@ -7,9 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/valyala/fastjson/fastfloat"
+
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 )
 
 // Rows contains parsed Prometheus rows.
@@ -110,6 +111,7 @@ func nextWhitespace(s string) int {
 	return n1
 }
 
+// 将数据解析成Row，也就是一条指标数据
 func (r *Row) unmarshal(s string, tagsPool []Tag, noEscapes bool) ([]Tag, error) {
 	r.reset()
 	s = skipLeadingWhitespace(s)
@@ -120,6 +122,7 @@ func (r *Row) unmarshal(s string, tagsPool []Tag, noEscapes bool) ([]Tag, error)
 		s = s[n+1:]
 		tagsStart := len(tagsPool)
 		var err error
+		// 反序列化tag
 		s, tagsPool, err = unmarshalTags(tagsPool, s, noEscapes)
 		if err != nil {
 			return tagsPool, fmt.Errorf("cannot unmarshal tags: %w", err)
@@ -189,6 +192,7 @@ var rowsReadScrape = metrics.NewCounter(`vm_protoparser_rows_read_total{type="pr
 
 func unmarshalRows(dst []Row, s string, tagsPool []Tag, noEscapes bool, errLogger func(s string)) ([]Row, []Tag) {
 	dstLen := len(dst)
+	// 一行一行的处理
 	for len(s) > 0 {
 		n := strings.IndexByte(s, '\n')
 		if n < 0 {

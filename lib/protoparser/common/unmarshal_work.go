@@ -28,9 +28,11 @@ func StartUnmarshalWorkers() {
 	gomaxprocs := cgroup.AvailableCPUs()
 	unmarshalWorkCh = make(chan UnmarshalWork, gomaxprocs)
 	unmarshalWorkersWG.Add(gomaxprocs)
+	// 启动处理协程
 	for i := 0; i < gomaxprocs; i++ {
 		go func() {
 			defer unmarshalWorkersWG.Done()
+			// 协程等待处理
 			for uw := range unmarshalWorkCh {
 				uw.Unmarshal()
 			}

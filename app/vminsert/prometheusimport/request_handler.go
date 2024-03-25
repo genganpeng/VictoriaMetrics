@@ -3,6 +3,8 @@ package prometheusimport
 import (
 	"net/http"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vminsert/netstorage"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vminsert/relabel"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/auth"
@@ -12,7 +14,6 @@ import (
 	parser "github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/prometheus"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/prometheus/stream"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/tenantmetrics"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 var (
@@ -23,6 +24,7 @@ var (
 
 // InsertHandler processes `/api/v1/import/prometheus` request.
 func InsertHandler(at *auth.Token, req *http.Request) error {
+	// 获取额外的标签
 	extraLabels, err := parserCommon.GetExtraLabels(req)
 	if err != nil {
 		return err
@@ -33,6 +35,7 @@ func InsertHandler(at *auth.Token, req *http.Request) error {
 	}
 	isGzipped := req.Header.Get("Content-Encoding") == "gzip"
 	return stream.Parse(req.Body, defaultTimestamp, isGzipped, true, func(rows []parser.Row) error {
+		// 反序列化数据完成后执行插入操作
 		return insertRows(at, rows, extraLabels)
 	}, func(s string) {
 		httpserver.LogError(req, s)
