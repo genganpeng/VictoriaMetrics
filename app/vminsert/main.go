@@ -115,12 +115,14 @@ func main() {
 		// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1672
 		hashSeed = 0xabcdef0123456789
 	}
+	// 初始化存储节点并建立连接池，发送到存储节点
 	netstorage.Init(*storageNodes, hashSeed)
 	logger.Infof("successfully initialized netstorage in %.3f seconds", time.Since(startTime).Seconds())
-
+	// relabel初始化
 	relabel.Init()
 	storage.SetMaxLabelsPerTimeseries(*maxLabelsPerTimeseries)
 	storage.SetMaxLabelValueLen(*maxLabelValueLen)
+	// 启动反序列化的work池
 	common.StartUnmarshalWorkers()
 	if len(*clusternativeListenAddr) > 0 {
 		clusternativeServer = clusternativeserver.MustStart(*clusternativeListenAddr, func(c net.Conn) error {
@@ -150,9 +152,11 @@ func main() {
 	if len(listenAddrs) == 0 {
 		listenAddrs = []string{":8480"}
 	}
+	// 接受http请求
 	go httpserver.Serve(listenAddrs, useProxyProtocol, requestHandler)
 
 	pushmetrics.Init()
+	// 等待停止信号，下面是收尾工作
 	sig := procutil.WaitForSigterm()
 	logger.Infof("service received signal %s", sig)
 	pushmetrics.Stop()

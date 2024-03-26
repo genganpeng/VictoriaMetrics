@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+	"github.com/cespare/xxhash/v2"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/consts"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
@@ -21,8 +24,6 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timerpool"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timeutil"
-	"github.com/VictoriaMetrics/metrics"
-	"github.com/cespare/xxhash/v2"
 )
 
 var (
@@ -47,6 +48,7 @@ var (
 
 var errStorageReadOnly = errors.New("storage node is read only")
 
+// isReady检查存储节点是否可用
 func (sn *storageNode) isReady() bool {
 	return !sn.isBroken.Load() && !sn.isReadOnly.Load()
 }
@@ -66,6 +68,7 @@ func (sn *storageNode) push(snb *storageNodesBucket, buf []byte, rows int) error
 		logger.Panicf("BUG: len(buf)=%d cannot exceed %d", len(buf), maxBufSizePerStorageNode)
 	}
 	sn.rowsPushed.Add(rows)
+	// 再次节点尝试发送，也是异步发送
 	if sn.trySendBuf(buf, rows) {
 		// Fast path - the buffer is successfully sent to sn.
 		return nil
@@ -77,6 +80,7 @@ func (sn *storageNode) push(snb *storageNodesBucket, buf []byte, rows int) error
 		return nil
 	}
 	// Slow path - sn cannot accept buf now, so re-route it to other vmstorage nodes.
+	// 如果buf满了，也在此处理
 	if err := sn.rerouteBufToOtherStorageNodes(snb, buf, rows); err != nil {
 		return fmt.Errorf("error when re-routing rows from %s: %w", sn.dialer.Addr(), err)
 	}
@@ -96,7 +100,9 @@ again:
 	default:
 	}
 
+	// 节点不可用和可用满的情况，不同情况处理。暂不清楚原因
 	if !sn.isReady() {
+		// 只有一个节点或者禁止路由到其他节点则需要等待当前节点可用
 		if len(sns) == 1 {
 			// There are no other storage nodes to re-route to. So wait until the current node becomes healthy.
 			sn.brCond.Wait()
@@ -110,6 +116,7 @@ again:
 		sn.brLock.Unlock()
 
 		// The vmstorage node isn't ready for data processing. Re-route buf to healthy vmstorage nodes even if disableRerouting is set.
+		// 这是一个可能会阻塞的方法
 		rowsProcessed, err := rerouteRowsToReadyStorageNodes(snb, sn, buf)
 		rows -= rowsProcessed
 		if err != nil {
@@ -118,6 +125,7 @@ again:
 		return nil
 	}
 
+	// buf数据满了后在此等待
 	if len(sn.br.buf)+len(buf) <= maxBufSizePerStorageNode {
 		// Fast path: the buf contents fits sn.buf.
 		sn.br.buf = append(sn.br.buf, buf...)
@@ -149,6 +157,7 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 		replicas = len(sns)
 	}
 
+	// 如果节点readonly则检查是否重置状态
 	sn.readOnlyCheckerWG.Add(1)
 	go func() {
 		defer sn.readOnlyCheckerWG.Done()
@@ -166,6 +175,7 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 		sn.brLock.Lock()
 		waitForNewData := len(sn.br.buf) == 0
 		sn.brLock.Unlock()
+		// 没有数据则等待一会
 		if waitForNewData {
 			select {
 			case <-sn.stopCh:
@@ -178,10 +188,13 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 
 		sn.brLock.Lock()
 		sn.br, br = br, sn.br
+		// 通知有可用的内容
 		sn.brCond.Broadcast()
 		sn.brLock.Unlock()
 
 		currentTime := fasttime.UnixTimestamp()
+		// 此段代码管理一个缓冲区br.buf，旨在减少内存使用。
+		// 当缓冲区的使用量低于其容量的四分之一，并且自上次重置以来超过10个时间单位时，重置缓冲区以释放内存。
 		if len(br.buf) < cap(br.buf)/4 && currentTime-brLastResetTime > 10 {
 			// Free up capacity space occupied by br.buf in order to reduce memory usage after spikes.
 			br.buf = append(br.buf[:0:0], br.buf...)
@@ -193,6 +206,7 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 			continue
 		}
 		// Send br to replicas storage nodes starting from snIdx.
+		// 非阻塞方式尝试发送缓冲区给副本存储节点
 		for !sendBufToReplicasNonblocking(snb, &br, snIdx, replicas) {
 			d := timeutil.AddJitterToDuration(time.Millisecond * 200)
 			t := timerpool.Get(d)
@@ -259,6 +273,7 @@ var (
 	incompleteReplicationLogger = logger.WithThrottler("incompleteReplication", 5*time.Second)
 )
 
+// 检查节点的健康状态，不正常则重新建立连接
 func (sn *storageNode) checkHealth() {
 	sn.bcLock.Lock()
 	defer sn.bcLock.Unlock()
@@ -571,6 +586,7 @@ func initStorageNodes(addrs []string, hashSeed uint64) *storageNodesBucket {
 		sns = append(sns, sn)
 	}
 
+	// 节点一次性接受的最大数据包大小
 	maxBufSizePerStorageNode = memory.Allowed() / 8 / len(sns)
 	if maxBufSizePerStorageNode > consts.MaxInsertPacketSizeForVMInsert {
 		maxBufSizePerStorageNode = consts.MaxInsertPacketSizeForVMInsert
@@ -616,6 +632,7 @@ func rerouteRowsToReadyStorageNodes(snb *storageNodesBucket, snSource *storageNo
 	var idxsExclude, idxsExcludeNew []int
 	nodesHash := snb.nodesHash
 	sns := snb.sns
+	// 此方法会阻塞到一直有可用的节点
 	idxsExclude = getNotReadyStorageNodeIdxsBlocking(snb, idxsExclude[:0])
 	var mr storage.MetricRow
 	for len(src) > 0 {
@@ -710,6 +727,7 @@ func rerouteRowsToFreeStorageNodes(snb *storageNodesBucket, snSource *storageNod
 		rowBuf := src[:len(src)-len(tail)]
 		src = tail
 		reroutedRowsProcessed.Inc()
+		// note: 这个地方的hash值计算与(ctx *InsertCtx) GetStorageNodeIdx不一样
 		h := xxhash.Sum64(mr.MetricNameRaw)
 		mr.ResetX()
 
@@ -722,6 +740,7 @@ func rerouteRowsToFreeStorageNodes(snb *storageNodesBucket, snSource *storageNod
 		// The row couldn't be sent to snSrouce. Try re-routing it to other node.
 		idx := nodesHash.getNodeIdx(h, idxsExclude)
 		sn := sns[idx]
+		// 重新选择一个可用的节点
 		for !sn.isReady() && len(idxsExclude) < len(sns) {
 			// re-generate idxsExclude list, since sn and snSource must be put there.
 			idxsExclude = getNotReadyStorageNodeIdxs(snb, idxsExclude[:0], snSource)
@@ -742,12 +761,14 @@ func rerouteRowsToFreeStorageNodes(snb *storageNodesBucket, snSource *storageNod
 }
 
 func getNotReadyStorageNodeIdxsBlocking(snb *storageNodesBucket, dst []int) []int {
+	// 获取不可用的节点
 	dst = getNotReadyStorageNodeIdxs(snb, dst[:0], nil)
 	sns := snb.sns
 	if len(dst) < len(sns) {
 		return dst
 	}
 	noStorageNodesLogger.Warnf("all the vmstorage nodes are unavailable; stopping data processing util at least a single node becomes available")
+	// 等待直接有可用的节点
 	for {
 		tc := timerpool.Get(time.Second)
 		select {
@@ -781,6 +802,7 @@ func getNotReadyStorageNodeIdxs(snb *storageNodesBucket, dst []int, snExtra *sto
 }
 
 func (sn *storageNode) trySendBuf(buf []byte, rows int) bool {
+	// 此节点不可用
 	if !sn.isReady() {
 		// Fast path without locking the sn.brLock.
 		return false

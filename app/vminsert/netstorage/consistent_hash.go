@@ -24,6 +24,8 @@ func newConsistentHash(nodes []string, hashSeed uint64) *consistentHash {
 	}
 }
 
+// 从节点哈希中找到哈希值最大的节点索引，排除指定的节点索引
+// 一致性hash算法： Highest Random Weight algorithm，也称为 Rendezvous Hashing
 func (rh *consistentHash) getNodeIdx(h uint64, excludeIdxs []int) int {
 	var mMax uint64
 	var idx int
@@ -36,7 +38,9 @@ func (rh *consistentHash) getNodeIdx(h uint64, excludeIdxs []int) int {
 	}
 
 next:
+	// 计算hash最大的节点
 	for i, nh := range rh.nodeHashes {
+		// 排除无需计算的节点
 		for _, j := range excludeIdxs {
 			if i == j {
 				continue next

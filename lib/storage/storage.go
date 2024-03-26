@@ -15,6 +15,9 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/VictoriaMetrics/fastcache"
+	"github.com/VictoriaMetrics/metricsql"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/backupnames"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bloomfilter"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
@@ -29,8 +32,6 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timeutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/uint64set"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/workingsetcache"
-	"github.com/VictoriaMetrics/fastcache"
-	"github.com/VictoriaMetrics/metricsql"
 )
 
 const (
@@ -1589,6 +1590,7 @@ func (mr *MetricRow) Marshal(dst []byte) []byte {
 }
 
 // MarshalMetricRow marshals MetricRow data to dst and returns the result.
+// metricNameRaw的长度+metricNameRaw数据+8个字节的时间戳+8个字节的value
 func MarshalMetricRow(dst []byte, metricNameRaw []byte, timestamp int64, value float64) []byte {
 	dst = encoding.MarshalBytes(dst, metricNameRaw)
 	dst = encoding.MarshalUint64(dst, uint64(timestamp))
@@ -1622,6 +1624,7 @@ func UnmarshalMetricRows(dst []MetricRow, src []byte, maxRows int) ([]MetricRow,
 // UnmarshalX unmarshals mr from src and returns the remaining tail from src.
 //
 // mr refers to src, so it remains valid until src changes.
+// 根据序列数据的结构，反序列化出row。 metricNameRaw的长度+metricNameRaw数据+8个字节的时间戳+8个字节的value
 func (mr *MetricRow) UnmarshalX(src []byte) ([]byte, error) {
 	tail, metricNameRaw, err := encoding.UnmarshalBytes(src)
 	if err != nil {

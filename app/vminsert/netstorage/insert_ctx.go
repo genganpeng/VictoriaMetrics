@@ -47,6 +47,7 @@ func (br *bufRows) reset() {
 func (br *bufRows) pushTo(snb *storageNodesBucket, sn *storageNode) error {
 	bufLen := len(br.buf)
 	err := sn.push(snb, br.buf, br.rows)
+	// 一次数据发送完毕重置
 	br.reset()
 	if err != nil {
 		return &httpserver.ErrorWithStatusCode{
@@ -59,6 +60,7 @@ func (br *bufRows) pushTo(snb *storageNodesBucket, sn *storageNode) error {
 
 // Reset resets ctx.
 func (ctx *InsertCtx) Reset() {
+	// 设置存储节点
 	ctx.snb = getStorageNodesBucket()
 
 	labels := ctx.Labels
@@ -122,10 +124,11 @@ func (ctx *InsertCtx) ApplyRelabeling() {
 }
 
 // WriteDataPoint writes (timestamp, value) data point with the given at and labels to ctx buffer.
+// 处理一个序列数据
 func (ctx *InsertCtx) WriteDataPoint(at *auth.Token, labels []prompb.Label, timestamp int64, value float64) error {
 	// 使用 accountID、projectID、labels(处理不符合要求的label，比如name和value length) 信息拼接在一起，压缩信息成 MetricNameBuf
 	ctx.MetricNameBuf = storage.MarshalMetricNameRaw(ctx.MetricNameBuf[:0], at.AccountID, at.ProjectID, labels)
-
+	// 根据一致性hash算法获取存储节点
 	storageNodeIdx := ctx.GetStorageNodeIdx(at, labels)
 	return ctx.WriteDataPointExt(storageNodeIdx, ctx.MetricNameBuf, timestamp, value)
 }
@@ -134,15 +137,21 @@ func (ctx *InsertCtx) WriteDataPoint(at *auth.Token, labels []prompb.Label, time
 func (ctx *InsertCtx) WriteDataPointExt(storageNodeIdx int, metricNameRaw []byte, timestamp int64, value float64) error {
 	br := &ctx.bufRowss[storageNodeIdx]
 	snb := ctx.snb
+	// 存储节点
 	sn := snb.sns[storageNodeIdx]
+	// br.buf其实值传递，在br.buf添加数据但是本身不会发生变化，因为不影响br.buf的数据的长度，但是底层空间是共用的
 	bufNew := storage.MarshalMetricRow(br.buf, metricNameRaw, timestamp, value)
+	// maxBufSizePerStorageNode 节点一次性接受的最大数据包大小
 	if len(bufNew) >= maxBufSizePerStorageNode {
 		// Send buf to sn, since it is too big.
+		// 将之前的数据发送出去
 		if err := br.pushTo(snb, sn); err != nil {
 			return err
 		}
+		// 将之前数据发送之后，添加添加到buf中
 		br.buf = storage.MarshalMetricRow(bufNew[:0], metricNameRaw, timestamp, value)
 	} else {
+		// 不够大，直接添加到buf。下次一起发送
 		br.buf = bufNew
 	}
 	br.rows++

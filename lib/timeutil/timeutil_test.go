@@ -1,6 +1,7 @@
 package timeutil
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -12,6 +13,7 @@ func TestAddJitterToDuration(t *testing.T) {
 		if result < d {
 			t.Fatalf("unexpected negative jitter")
 		}
+		fmt.Println(result)
 		variance := (float64(result) - float64(d)) / float64(d)
 		if variance > 0.1 {
 			t.Fatalf("too big variance=%.2f for result=%s, d=%s; mustn't exceed 0.1", variance, result, d)

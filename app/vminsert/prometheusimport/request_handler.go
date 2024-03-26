@@ -49,6 +49,7 @@ func insertRows(at *auth.Token, rows []parser.Row, extraLabels []prompbmarshal.L
 	ctx.Reset() // This line is required for initializing ctx internals.
 	perTenantRows := make(map[auth.Token]int)
 	hasRelabeling := relabel.HasRelabeling()
+	// 一行一行数据处理
 	for i := range rows {
 		r := &rows[i]
 		ctx.Labels = ctx.Labels[:0]
