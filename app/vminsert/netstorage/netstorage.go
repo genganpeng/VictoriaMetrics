@@ -187,8 +187,9 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 		}
 
 		sn.brLock.Lock()
+		// 这里br为空
 		sn.br, br = br, sn.br
-		// 通知有可用的内容
+		// 通知有可用的空间
 		sn.brCond.Broadcast()
 		sn.brLock.Unlock()
 
@@ -206,7 +207,7 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 			continue
 		}
 		// Send br to replicas storage nodes starting from snIdx.
-		// 非阻塞方式尝试发送缓冲区给副本存储节点
+		// 非阻塞方式尝试发送缓冲区给副本存储节点， 发送不成功继续发送
 		for !sendBufToReplicasNonblocking(snb, &br, snIdx, replicas) {
 			d := timeutil.AddJitterToDuration(time.Millisecond * 200)
 			t := timerpool.Get(d)
@@ -220,6 +221,7 @@ func (sn *storageNode) run(snb *storageNodesBucket, snIdx int) {
 				sn.checkHealth()
 			}
 		}
+		// 重置
 		br.reset()
 	}
 }
@@ -232,6 +234,7 @@ func sendBufToReplicasNonblocking(snb *storageNodesBucket, br *bufRows, snIdx, r
 		attempts := 0
 		for {
 			attempts++
+			// 因为所有的存储节点都已经发送过一次了，所有可能会造成数据重复
 			if attempts > len(sns) {
 				if i == 0 {
 					// The data wasn't replicated at all.
@@ -256,6 +259,7 @@ func sendBufToReplicasNonblocking(snb *storageNodesBucket, br *bufRows, snIdx, r
 				// The br has been already replicated to sn. Skip it.
 				continue
 			}
+			// 发送数据
 			if !sn.sendBufRowsNonblocking(br) {
 				// Cannot send data to sn. Go to the next sn.
 				continue
@@ -331,6 +335,7 @@ func (sn *storageNode) sendBufRowsNonblocking(br *bufRows) bool {
 		// so it will be re-routed to the remaining vmstorage nodes.
 		return false
 	}
+	// 无法发送数据则标记此此节点为不可用
 	// Couldn't flush buf to sn. Mark sn as broken.
 	cannotSendBufsLogger.Warnf("cannot send %d bytes with %d rows to -storageNode=%q: %s; closing the connection to storageNode and "+
 		"re-routing this data to healthy storage nodes", len(br.buf), br.rows, sn.dialer.Addr(), err)
@@ -358,6 +363,7 @@ func sendToConn(bc *handshake.BufferedConn, buf []byte) error {
 	}
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	deadline := time.Now().Add(timeout)
+	// 根据数据量大小设置超时时间
 	if err := bc.SetWriteDeadline(deadline); err != nil {
 		return fmt.Errorf("cannot set write deadline to %s: %w", deadline, err)
 	}
@@ -602,6 +608,7 @@ func initStorageNodes(addrs []string, hashSeed uint64) *storageNodesBucket {
 		wg:        &wg,
 	}
 
+	// 并发
 	for idx, sn := range sns {
 		wg.Add(1)
 		go func(sn *storageNode, idx int) {
@@ -635,6 +642,7 @@ func rerouteRowsToReadyStorageNodes(snb *storageNodesBucket, snSource *storageNo
 	// 此方法会阻塞到一直有可用的节点
 	idxsExclude = getNotReadyStorageNodeIdxsBlocking(snb, idxsExclude[:0])
 	var mr storage.MetricRow
+	// 这里可能多条数据，一条一条数据处理
 	for len(src) > 0 {
 		tail, err := mr.UnmarshalX(src)
 		if err != nil {
@@ -643,9 +651,11 @@ func rerouteRowsToReadyStorageNodes(snb *storageNodesBucket, snSource *storageNo
 		rowBuf := src[:len(src)-len(tail)]
 		src = tail
 		reroutedRowsProcessed.Inc()
+		// 不同于(ctx *InsertCtx) GetStorageNodeIdx，使用labelsBuf计算hash
 		h := xxhash.Sum64(mr.MetricNameRaw)
 		mr.ResetX()
 		var sn *storageNode
+		// 获取可用的节点
 		for {
 			idx := nodesHash.getNodeIdx(h, idxsExclude)
 			sn = sns[idx]
@@ -661,7 +671,9 @@ func rerouteRowsToReadyStorageNodes(snb *storageNodesBucket, snSource *storageNo
 			// re-generate idxsExclude list, since sn must be put there.
 			idxsExclude = getNotReadyStorageNodeIdxsBlocking(snb, idxsExclude[:0])
 		}
+		// 如果禁用重路由，则直接发送数据并阻塞等待能够发送出去
 		if *disableRerouting {
+			// 缓存区满了则等待
 			if !sn.sendBufMayBlock(rowBuf) {
 				return rowsProcessed, fmt.Errorf("graceful shutdown started")
 			}
@@ -673,6 +685,7 @@ func rerouteRowsToReadyStorageNodes(snb *storageNodesBucket, snSource *storageNo
 			continue
 		}
 	again:
+		// 尝试发送
 		if sn.trySendBuf(rowBuf, 1) {
 			rowsProcessed++
 			if sn != snSource {
