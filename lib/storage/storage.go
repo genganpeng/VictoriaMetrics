@@ -61,8 +61,9 @@ type Storage struct {
 	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1401
 	nextRotationTimestamp atomic.Int64
 
-	path           string
-	cachePath      string
+	path      string
+	cachePath string
+	// 数据有效期
 	retentionMsecs int64
 
 	// lock file for exclusive access to the storage on the given path.
@@ -1611,6 +1612,7 @@ func UnmarshalMetricRows(dst []MetricRow, src []byte, maxRows int) ([]MetricRow,
 			dst = append(dst, MetricRow{})
 		}
 		mr := &dst[len(dst)-1]
+		// 每次反序列化一条数据
 		tail, err := mr.UnmarshalX(src)
 		if err != nil {
 			return dst, tail, err
@@ -1671,6 +1673,7 @@ func (s *Storage) AddRows(mrs []MetricRow, precisionBits uint8) error {
 	var firstErr error
 	ic := getMetricRowsInsertCtx()
 	maxBlockLen := len(ic.rrs)
+	// 每批次最多处理ic.rrs 8000
 	for len(mrs) > 0 {
 		mrsBlock := mrs
 		if len(mrs) > maxBlockLen {
@@ -1679,6 +1682,7 @@ func (s *Storage) AddRows(mrs []MetricRow, precisionBits uint8) error {
 		} else {
 			mrs = nil
 		}
+		// 写入数据
 		if err := s.add(ic.rrs, ic.tmpMrs, mrsBlock, precisionBits); err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -1855,6 +1859,9 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 	// Return only the first error, since it has no sense in returning all errors.
 	var firstWarn error
 
+	// 1.构造r.TSID
+	// 若跟prevMetricNameRaw相同，则使用pervTSID;
+	// 若cache中有metricNameRaw，则使用cache.TSID；
 	j := 0
 	for i := range mrs {
 		mr := &mrs[i]
@@ -1869,6 +1876,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 		}
 		if mr.Timestamp < minTimestamp {
 			// Skip rows with too small timestamps outside the retention.
+			// 后面过期的数据不会打印日志，只会统计在tooSmallTimestampRows
 			if firstWarn == nil {
 				metricName := getUserReadableMetricName(mr.MetricNameRaw)
 				firstWarn = fmt.Errorf("cannot insert row with too small timestamp %d outside the retention; minimum allowed timestamp is %d; "+

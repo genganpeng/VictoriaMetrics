@@ -108,6 +108,7 @@ again:
 			sn.brCond.Wait()
 			goto again
 		}
+		// 禁止重路由
 		if *disableReroutingOnUnavailable {
 			// We should not send timeseries from currently unavailable storage to alive storage nodes.
 			sn.brCond.Wait()
@@ -134,6 +135,7 @@ again:
 		return nil
 	}
 	// Slow path: the buf contents doesn't fit sn.buf, so try re-routing it to other vmstorage nodes.
+	// 禁止重路由或者只有一个节点，则等待
 	if *disableRerouting || len(sns) == 1 {
 		sn.brCond.Wait()
 		goto again
@@ -282,10 +284,12 @@ func (sn *storageNode) checkHealth() {
 	sn.bcLock.Lock()
 	defer sn.bcLock.Unlock()
 
+	// 连接存在则返回
 	if sn.bc != nil {
 		// The sn looks healthy.
 		return
 	}
+	// 建立连接
 	bc, err := sn.dial()
 	if err != nil {
 		sn.isBroken.Store(true)
@@ -409,6 +413,7 @@ func sendToConn(bc *handshake.BufferedConn, buf []byte) error {
 
 var sizeBufPool bytesutil.ByteBufferPool
 
+// 建立连接
 func (sn *storageNode) dial() (*handshake.BufferedConn, error) {
 	c, err := sn.dialer.Dial()
 	if err != nil {
@@ -419,6 +424,7 @@ func (sn *storageNode) dial() (*handshake.BufferedConn, error) {
 	if *disableRPCCompression {
 		compressionLevel = 0
 	}
+	// 客户端和服务器端确认连接正常
 	bc, err := handshake.VMInsertClient(c, compressionLevel)
 	if err != nil {
 		_ = c.Close()

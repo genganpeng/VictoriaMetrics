@@ -50,6 +50,7 @@ type VMInsertServer struct {
 
 // NewVMInsertServer starts VMInsertServer at the given addr serving the given storage.
 func NewVMInsertServer(addr string, storage *storage.Storage) (*VMInsertServer, error) {
+	//  接受来自insert的数据
 	ln, err := netutil.NewTCPListener("vminsert", addr, false, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to listen vminsertAddr %s: %w", addr, err)
@@ -63,6 +64,7 @@ func NewVMInsertServer(addr string, storage *storage.Storage) (*VMInsertServer, 
 	}
 	s.connsMap.Init("vminsert")
 	s.wg.Add(1)
+	// 启动接受的连接
 	go func() {
 		s.run()
 		s.wg.Done()
@@ -101,6 +103,7 @@ func (s *VMInsertServer) run() {
 			// There is no need in response compression, since
 			// vmstorage sends only small packets to vminsert.
 			compressionLevel := 0
+			// 建立连接
 			bc, err := handshake.VMInsertServer(c, compressionLevel)
 			if err != nil {
 				if s.isStopping() {
@@ -121,6 +124,7 @@ func (s *VMInsertServer) run() {
 			}()
 
 			logger.Infof("processing vminsert conn from %s", c.RemoteAddr())
+			// 在这里不断接受数据并处理数据
 			err = stream.Parse(bc, func(rows []storage.MetricRow) error {
 				vminsertMetricsRead.Add(len(rows))
 				return s.storage.AddRows(rows, uint8(*precisionBits))

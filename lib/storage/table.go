@@ -358,6 +358,7 @@ func (tb *table) MustAddRows(rows []rawRow) {
 	tb.ptwsLock.Unlock()
 }
 
+// 可接受的数据的最小时间和最大时间
 func (tb *table) getMinMaxTimestamps() (int64, int64) {
 	now := int64(fasttime.UnixTimestamp() * 1000)
 	minTimestamp := now - tb.s.retentionMsecs

@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/httpserver"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timerpool"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 var (
@@ -62,6 +63,7 @@ var readerPool sync.Pool
 // It increases concurrency after the first call or after the next call after DecConcurrency() call.
 func (r *Reader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
+	// increasedConcurrency如果是同一个read则不需要增减concurrency
 	if !r.increasedConcurrency {
 		if !incConcurrency() {
 			err = &httpserver.ErrorWithStatusCode{

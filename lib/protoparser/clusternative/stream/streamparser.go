@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/consts"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
@@ -14,7 +16,6 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/common"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/writeconcurrencylimiter"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 // Parse parses data sent from vminsert to bc and calls callback for parsed rows.
@@ -25,6 +26,7 @@ import (
 //
 // callback shouldn't hold block after returning.
 func Parse(bc *handshake.BufferedConn, callback func(rows []storage.MetricRow) error, isReadOnly func() bool) error {
+	// 控制读取数据的并发度，在readBlock中会调用wcr中的read方法
 	wcr := writeconcurrencylimiter.GetReader(bc)
 	defer writeconcurrencylimiter.PutReader(wcr)
 	r := io.Reader(wcr)
@@ -35,6 +37,7 @@ func Parse(bc *handshake.BufferedConn, callback func(rows []storage.MetricRow) e
 		callbackErr     error
 	)
 	for {
+		// 读取数据
 		reqBuf, err := readBlock(nil, r, bc, isReadOnly)
 		if err != nil {
 			wg.Wait()
@@ -68,6 +71,7 @@ func Parse(bc *handshake.BufferedConn, callback func(rows []storage.MetricRow) e
 func readBlock(dst []byte, r io.Reader, bc *handshake.BufferedConn, isReadOnly func() bool) ([]byte, error) {
 	sizeBuf := auxBufPool.Get()
 	defer auxBufPool.Put(sizeBuf)
+	// 数据包构成：8个字节数据包长度+数据
 	sizeBuf.B = bytesutil.ResizeNoCopyMayOverallocate(sizeBuf.B, 8)
 	if _, err := io.ReadFull(r, sizeBuf.B); err != nil {
 		if err != io.EOF {
@@ -91,6 +95,7 @@ func readBlock(dst []byte, r io.Reader, bc *handshake.BufferedConn, isReadOnly f
 		// The vmstorage is in readonly mode, so drop the read block of data
 		// and send `read only` status to vminsert.
 		dst = dst[:dstLen]
+		// 2表示readonly状态
 		if err := sendAck(bc, 2); err != nil {
 			writeErrors.Inc()
 			return dst, fmt.Errorf("cannot send readonly status to vminsert: %w", err)
@@ -152,6 +157,7 @@ func (uw *unmarshalWork) Unmarshal() {
 	for len(reqBuf) > 0 {
 		// Limit the number of rows passed to callback in order to reduce memory usage
 		// when processing big packets of rows.
+		// 每次只处理maxRowsPerCallback个MetricRow
 		mrs, tail, err := storage.UnmarshalMetricRows(uw.mrs[:0], reqBuf, maxRowsPerCallback)
 		uw.mrs = mrs
 		if err != nil {

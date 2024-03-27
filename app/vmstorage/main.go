@@ -120,6 +120,7 @@ func main() {
 	})
 	metrics.RegisterSet(storageMetrics)
 
+	// 启动unmarshal workers，这是反序列化池
 	common.StartUnmarshalWorkers()
 	vminsertSrv, err := servers.NewVMInsertServer(*vminsertAddr, strg)
 	if err != nil {
@@ -138,6 +139,7 @@ func main() {
 	go httpserver.Serve(listenAddrs, useProxyProtocol, requestHandler)
 
 	pushmetrics.Init()
+	// 等待停止信号
 	sig := procutil.WaitForSigterm()
 	logger.Infof("service received signal %s", sig)
 	pushmetrics.Stop()
