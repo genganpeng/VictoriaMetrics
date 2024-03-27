@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmselect/clusternative"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmselect/graphite"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmselect/netstorage"
@@ -35,7 +37,6 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/tenantmetrics"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/timerpool"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/vmselectapi"
-	"github.com/VictoriaMetrics/metrics"
 )
 
 var (
@@ -106,6 +107,7 @@ func main() {
 		logger.Fatalf("found equal addresses of storage nodes in the -storageNodes flag: %q", duplicatedAddr)
 	}
 
+	// 初始化查询节点
 	netstorage.Init(*storageNodes)
 	logger.Infof("started netstorage in %.3f seconds", time.Since(startTime).Seconds())
 
@@ -118,6 +120,7 @@ func main() {
 		netstorage.InitTmpBlocksDir("")
 		promql.InitRollupResultCache("")
 	}
+	// 控制并发查询数量
 	concurrencyLimitCh = make(chan struct{}, *maxConcurrentRequests)
 	initVMAlertProxy()
 	var vmselectapiServer *vmselectapi.Server
@@ -138,6 +141,7 @@ func main() {
 	go httpserver.Serve(listenAddrs, useProxyProtocol, requestHandler)
 
 	pushmetrics.Init()
+	// 接受停止信号
 	sig := procutil.WaitForSigterm()
 	logger.Infof("service received signal %s", sig)
 	pushmetrics.Stop()
@@ -196,6 +200,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) bool {
 	qt := querytracer.New(tracerEnabled, r.URL.Path)
 
 	// Limit the number of concurrent queries.
+	// 等待可用的查询，超时则放弃
 	select {
 	case concurrencyLimitCh <- struct{}{}:
 		defer func() { <-concurrencyLimitCh }()
@@ -235,6 +240,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 
+	// 记录慢查询
 	if *logSlowQueryDuration > 0 {
 		actualStartTime := time.Now()
 		defer func() {

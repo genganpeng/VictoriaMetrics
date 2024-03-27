@@ -1814,9 +1814,10 @@ func startStorageNodesRequest(qt *querytracer.Tracer, sns []*storageNode, denyPa
 	for idx, sn := range sns {
 		qtChild := qt.NewChild("rpc at vmstorage %s", sn.connPool.Addr())
 		qts[qtChild] = struct{}{}
+		// 每个storageNode分配一个goroutine
 		go func(workerID uint, sn *storageNode) {
 			data := f(qtChild, workerID, sn)
-			resultsCh <- rpcResult{
+			resultsCh <- rpcResult{ // 将结果放入chan
 				data:  data,
 				qt:    qtChild,
 				group: sn.group,
@@ -1862,6 +1863,11 @@ func (snr *storageNodesRequest) collectAllResults(f func(result interface{}) err
 	return nil
 }
 
+// 最终结果的判断原则：
+// 最完美的情况： 所有节点都正常返回且没有错误，则认为结果时完整且没有错误的：
+// 若正常返回的结果 > len(storageNode) - replicaFactor： 则被判定为数据完整且没有错误，直接返回； 比如3个节点，replica=2，只要>=2个节点正常返回，则认为结果数据是完整的
+// 若所有节点都出错了： 则认为结果是错误的，并返回第1个错误
+// 若部分节点返回错误： 则认为结果是不完整的：
 func (snr *storageNodesRequest) collectResults(partialResultsCounter *metrics.Counter, f func(result interface{}) error) (bool, error) {
 	sns := snr.sns
 	if len(sns) == 0 {
@@ -1873,7 +1879,7 @@ func (snr *storageNodesRequest) collectResults(partialResultsCounter *metrics.Co
 	for range sns {
 		// There is no need in timer here, since all the goroutines executing the f function
 		// passed to startStorageNodesRequest must be finished until the deadline.
-		result := <-snr.resultsCh
+		result := <-snr.resultsCh // 返回结果
 		group := result.group
 		if err := f(result.data); err != nil {
 			snr.finishQueryTracer(result.qt, fmt.Sprintf("error: %s", err))
