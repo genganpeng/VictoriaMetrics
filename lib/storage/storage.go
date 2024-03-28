@@ -2712,6 +2712,9 @@ func (s *Storage) putTSIDToCache(tsid *generationTSID, metricName []byte) {
 	s.tsidCache.Set(metricName, buf)
 }
 
+// 当索引目录不存在的时候会创建该目录，然后去该目录中查找最近的三个索引，如果没有三个索引，
+// 则去生成对应的索引目录，索引的名称就是当前纳秒时间戳原子+1后的16进制数据，
+// 然后通过 openIndexDB 函数分别打开这三个索引。
 func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB) {
 	fs.MustMkdirIfNotExist(path)
 	fs.MustRemoveTemporaryDirs(path)

@@ -19,6 +19,7 @@ import (
 var tmpFileNum atomic.Uint64
 
 // MustSyncPath syncs contents of the given path.
+// 将内存的数据刷新到磁盘
 func MustSyncPath(path string) {
 	mustSyncPath(path)
 }

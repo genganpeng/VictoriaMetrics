@@ -65,9 +65,10 @@ const (
 	nsPrefixDateMetricNameToTSID = 7
 )
 
-// indexDB represents an index db.
+// indexDB represents an index db
 type indexDB struct {
 	// The number of references to indexDB struct.
+	// 原子计数器必须位于结构体的顶部，以便在32位架构上正确对齐8个字节
 	refCount atomic.Int32
 
 	// if the mustDrop is set to true, then the indexDB must be dropped after refCount reaches zero.
@@ -75,29 +76,40 @@ type indexDB struct {
 
 	// The number of missing MetricID -> TSID entries.
 	// High rate for this value means corrupted indexDB.
+	// MetricID -> TSID 条目 miss 的数量
+	// 该值比率如果较高则证明 indexDB 损坏了
 	missingTSIDsForMetricID atomic.Uint64
 
 	// The number of calls for date range searches.
+	// date range 搜索的调用数
 	dateRangeSearchCalls atomic.Uint64
 
 	// The number of hits for date range searches.
+	// date range 搜索的命中数
 	dateRangeSearchHits atomic.Uint64
 
 	// The number of calls for global search.
+	// 全局搜索调用次数
 	globalSearchCalls atomic.Uint64
 
 	// missingMetricNamesForMetricID is a counter of missing MetricID -> MetricName entries.
 	// High rate may mean corrupted indexDB due to unclean shutdown.
 	// The db must be automatically recovered after that.
+	// MetricID -> MetricName 条目 miss 的数量
+	// 高比率可能意味着由于不干净的关机导致索引数据库损坏。
+	// 之后必须自动恢复db
 	missingMetricNamesForMetricID atomic.Uint64
 
 	// generation identifies the index generation ID
 	// and is used for syncing items from different indexDBs
+	// // 索引路径的最后一段（也就是文件夹的名称）转换成10进制
 	generation uint64
 
+	// 索引名称，索引路径的最后一段
 	name string
-	tb   *mergeset.Table
-
+	// Table 表结构
+	tb *mergeset.Table
+	// 相当于之前的一个 indexDB
 	extDB     *indexDB
 	extDBLock sync.Mutex
 
@@ -109,8 +121,10 @@ type indexDB struct {
 
 	// Cache for (date, tagFilter) -> loopsCount, which is used for reducing
 	// the amount of work when matching a set of filters.
+	// (date, tagFilter) -> loopsCount 的缓存
+	// 用于减少匹配一组过滤器时的工作量。
 	loopsPerDateTagFilterCache *workingsetcache.Cache
-
+	// 索引搜索的对象池
 	indexSearchPool sync.Pool
 }
 
@@ -136,7 +150,7 @@ func mustOpenIndexDB(path string, s *Storage, isReadOnly *atomic.Bool) *indexDB 
 	if s == nil {
 		logger.Panicf("BUG: Storage must be nin-nil")
 	}
-
+	// 获取路径的最后一段，也就是索引表（文件夹）的名称
 	name := filepath.Base(path)
 	gen, err := strconv.ParseUint(name, 16, 64)
 	if err != nil {

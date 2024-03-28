@@ -83,6 +83,7 @@ func maxItemsPerCachedPart() uint64 {
 
 // Table represents mergeset table.
 type Table struct {
+	// 原子更新的计数器必须在结构体最前面，这样在32位架构上可以正确地对齐到8字节。
 	activeInmemoryMerges atomic.Int64
 	activeFileMerges     atomic.Int64
 
@@ -101,9 +102,11 @@ type Table struct {
 
 	path string
 
+	// 将数据刷新到存储的回调
 	flushCallback         func()
 	needFlushCallbackCall atomic.Bool
 
+	// block 准备好的回调
 	prepareBlock PrepareBlockCallback
 	isReadOnly   *atomic.Bool
 
@@ -112,6 +115,8 @@ type Table struct {
 	// rawItems are converted to inmemoryParts at least every pendingItemsFlushInterval or when rawItems becomes full.
 	//
 	// rawItems aren't visible for search due to performance reasons.
+	// rawItems 包含最近添加的尚未转换为 parts 的数据。
+	// 出于性能原因，未在搜索中使用 rawItems
 	rawItems rawItemsShards
 
 	// partsLock protects inmemoryParts and fileParts.
@@ -121,6 +126,7 @@ type Table struct {
 	inmemoryParts []*partWrapper
 
 	// fileParts contains file-backed parts, which are visible for search.
+	// 包含的 part 列表
 	fileParts []*partWrapper
 
 	// inmemoryPartsLimitCh limits the number of inmemory parts to maxInmemoryParts
@@ -290,6 +296,7 @@ func (ris *rawItemsShard) updateFlushDeadline() {
 
 var tooLongItemLogger = logger.WithThrottler("tooLongItem", 5*time.Second)
 
+// 对part的包装
 type partWrapper struct {
 	// refCount is the number of references to partWrapper
 	refCount atomic.Int32
@@ -369,6 +376,7 @@ func MustOpenTable(path string, flushCallback func(), prepareBlock PrepareBlockC
 	}
 	tb.mergeIdx.Store(uint64(time.Now().UnixNano()))
 	tb.rawItems.init()
+	// 开始执行 rawItems 刷新的工作
 	tb.startBackgroundWorkers()
 
 	return tb
@@ -1482,6 +1490,7 @@ func mustOpenParts(path string) []*partWrapper {
 		// If it is missing, then manual action from the user is needed,
 		// since this is unexpected state, which cannot occur under normal operation,
 		// including unclean shutdown.
+		// 确保partName在磁盘上存在。如果没有，则需要用户手动操作，因为这是意外状态，在正常操作下不能发生，包括不干净的关机。
 		partPath := filepath.Join(path, partName)
 		if !fs.IsPathExist(partPath) {
 			partsFile := filepath.Join(path, partsFilename)
@@ -1492,6 +1501,7 @@ func mustOpenParts(path string) []*partWrapper {
 
 		m[partName] = struct{}{}
 	}
+	// 删除没有在parts.json中的part目录
 	for _, de := range des {
 		if !fs.IsDirOrSymlink(de) {
 			// Skip non-directories.
@@ -1600,6 +1610,7 @@ func mustWritePartNames(pws []*partWrapper, dstDir string) {
 }
 
 func mustReadPartNames(srcDir string) []string {
+	// 读取parts.json文件，获取part的数量
 	partNamesPath := filepath.Join(srcDir, partsFilename)
 	if fs.IsPathExist(partNamesPath) {
 		data, err := os.ReadFile(partNamesPath)
@@ -1612,6 +1623,7 @@ func mustReadPartNames(srcDir string) []string {
 		}
 		return partNames
 	}
+	// 1.90.0之前没有parts.json文件，读取srcDir下的所有目录
 	// The partsFilename is missing. This is the upgrade from versions previous to v1.90.0.
 	// Read part names from directories under srcDir
 	des := fs.MustReadDir(srcDir)
