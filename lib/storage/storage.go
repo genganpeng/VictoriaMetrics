@@ -194,6 +194,7 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 	}
 
 	// Protect from concurrent opens.
+	// 防止其他vmstorage进程读写此目录
 	s.flockF = fs.MustCreateFlockFile(path)
 
 	// Check whether restore process finished successfully
@@ -243,6 +244,7 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 	idbSnapshotsPath := filepath.Join(idbPath, snapshotsDirname)
 	fs.MustMkdirIfNotExist(idbSnapshotsPath)
 	fs.MustRemoveTemporaryDirs(idbSnapshotsPath)
+	// 打开索引数据表 path=vmstorage-data/indexdb
 	idbNext, idbCurr, idbPrev := s.mustOpenIndexDBTables(idbPath)
 
 	idbCurr.SetExtDB(idbPrev)
@@ -2729,11 +2731,14 @@ func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB)
 		}
 		tableNames = append(tableNames, tableName)
 	}
+	// 对表名进行排序
 	sort.Slice(tableNames, func(i, j int) bool {
 		return tableNames[i] < tableNames[j]
 	})
+	// 应该有3个表名，prev, curr and next. 不够3个自动生成表名补充
 	switch len(tableNames) {
 	case 0:
+		// 生成后面的一个表名（在前面表名的基础上做原子+1操作的16进制数据）
 		prevName := nextIndexDBTableName()
 		currName := nextIndexDBTableName()
 		nextName := nextIndexDBTableName()
