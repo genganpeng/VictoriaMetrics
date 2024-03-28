@@ -1,7 +1,7 @@
 搭建
 ![1](1.png)
 - 启动node_exporter
-# vmstroage
+# vmstorage
 main.go直接启动，数据目录在本工程目录下
 # vminsert
 ## start
