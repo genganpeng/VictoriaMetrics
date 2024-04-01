@@ -376,7 +376,7 @@ func MustOpenTable(path string, flushCallback func(), prepareBlock PrepareBlockC
 	}
 	tb.mergeIdx.Store(uint64(time.Now().UnixNano()))
 	tb.rawItems.init()
-	// 开始执行 rawItems 刷新的工作
+	// 开始执行 各种定时的工作
 	tb.startBackgroundWorkers()
 
 	return tb
@@ -1479,6 +1479,7 @@ func mustOpenParts(path string) []*partWrapper {
 	fs.MustRemoveAll(filepath.Join(path, "txn"))
 	fs.MustRemoveAll(filepath.Join(path, "tmp"))
 
+	// 获取part数据目录
 	partNames := mustReadPartNames(path)
 
 	// Remove dirs missing in partNames. These dirs may be left after unclean shutdown

@@ -2770,7 +2770,7 @@ func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB)
 	nextPath := filepath.Join(path, tableNames[2])
 	currPath := filepath.Join(path, tableNames[1])
 	prevPath := filepath.Join(path, tableNames[0])
-
+	// 打开这些表
 	next = mustOpenIndexDB(nextPath, s, &s.isReadOnly)
 	curr = mustOpenIndexDB(currPath, s, &s.isReadOnly)
 	prev = mustOpenIndexDB(prevPath, s, &s.isReadOnly)

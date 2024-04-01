@@ -137,7 +137,7 @@ func unmarshalTagValue(dst, src []byte) ([]byte, []byte, error) {
 type MetricName struct {
 	AccountID uint32
 	ProjectID uint32
-
+	// 对应指标名称 __name__
 	MetricGroup []byte
 
 	// Tags are optional. They must be sorted by tag Key for canonical view.

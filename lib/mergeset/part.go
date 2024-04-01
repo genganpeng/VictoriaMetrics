@@ -58,6 +58,7 @@ type part struct {
 
 	path string
 
+	// metaindexSize + indexSize + itemsSize + lensSize
 	size uint64
 
 	mrs []metaindexRow
@@ -67,8 +68,10 @@ type part struct {
 	lensFile  fs.MustReadAtCloser
 }
 
+// 读取part目录，并分别读取part中各个部分数据
 func mustOpenFilePart(path string) *part {
 	var ph partHeader
+	// 读取metadata.json-》partHeader
 	ph.MustReadMetadata(path)
 
 	metaindexPath := filepath.Join(path, metaindexFilename)
