@@ -102,7 +102,7 @@ type indexDB struct {
 
 	// generation identifies the index generation ID
 	// and is used for syncing items from different indexDBs
-	// // 索引路径的最后一段（也就是文件夹的名称）转换成10进制
+	// 索引路径的最后一段（也就是文件夹的名称）转换成10进制
 	generation uint64
 
 	// 索引名称，索引路径的最后一段
@@ -572,7 +572,7 @@ func (is *indexSearch) createGlobalIndexes(tsid *TSID, mn *MetricName) {
 type indexItems struct {
 	B     []byte
 	Items [][]byte
-
+	// 当前B的偏移量
 	start int
 }
 

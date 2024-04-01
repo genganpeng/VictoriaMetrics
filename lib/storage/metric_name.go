@@ -137,7 +137,7 @@ func unmarshalTagValue(dst, src []byte) ([]byte, []byte, error) {
 type MetricName struct {
 	AccountID uint32
 	ProjectID uint32
-	// 对应指标名称 __name__
+	// 对应指标名称，label的key为空字符串
 	MetricGroup []byte
 
 	// Tags are optional. They must be sorted by tag Key for canonical view.
@@ -723,6 +723,7 @@ func (mn *MetricName) marshalRaw(dst []byte) []byte {
 }
 
 // UnmarshalRaw unmarshals mn encoded with MarshalMetricNameRaw.
+// 按照顺序，先解码accountID，再解码projectID，再解码metricGroup，再解码tags
 func (mn *MetricName) UnmarshalRaw(src []byte) error {
 	mn.Reset()
 	if len(src) < 4 {

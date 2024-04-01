@@ -80,6 +80,7 @@ type Storage struct {
 	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1401
 	idbNext atomic.Pointer[indexDB]
 
+	// 数据表
 	tb *table
 
 	// Series cardinality limiters.
@@ -1835,6 +1836,7 @@ func (s *Storage) RegisterMetricNames(qt *querytracer.Tracer, mrs []MetricRow) {
 }
 
 func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, precisionBits uint8) error {
+	// 当前使用的索引表
 	idb := s.idb()
 	generation := idb.generation
 	is := idb.getIndexSearch(0, 0, noDeadline)
@@ -1862,6 +1864,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 	var firstWarn error
 
 	// 1.构造r.TSID
+	// 循环数据行，其实就是填充 rawRow 中的 TSID 数据
 	// 若跟prevMetricNameRaw相同，则使用pervTSID;
 	// 若cache中有metricNameRaw，则使用cache.TSID；
 	j := 0
@@ -1876,6 +1879,8 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 			}
 			isStaleNan = true
 		}
+		// 如果指标的时间戳小于最小的时间戳
+		// 则跳过保留期外时间戳过小的行
 		if mr.Timestamp < minTimestamp {
 			// Skip rows with too small timestamps outside the retention.
 			// 后面过期的数据不会打印日志，只会统计在tooSmallTimestampRows
@@ -1888,6 +1893,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 			s.tooSmallTimestampRows.Add(1)
 			continue
 		}
+		// 同样跳过超过最大时间戳的数据
 		if mr.Timestamp > maxTimestamp {
 			// Skip rows with too big timestamps significantly exceeding the current time.
 			if firstWarn == nil {
@@ -1905,6 +1911,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 		r.Value = mr.Value
 		r.PrecisionBits = precisionBits
 
+		// 快速路径 - 当前 mr 包含与前一 mr 相同的指标名称，因此它包含相同的 TSID。
 		// Search for TSID for the given mr.MetricNameRaw and store it at r.TSID.
 		if string(mr.MetricNameRaw) == string(prevMetricNameRaw) {
 			// Fast path - the current mr contains the same metric name as the previous mr, so it contains the same TSID.
@@ -1918,15 +1925,18 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 			// contain MetricName->TSID entries for deleted time series.
 			// See Storage.DeleteSeries code for details.
 
+			// 检查是否超过每小时或者每天最大的接受的数据量
 			if !s.registerSeriesCardinality(r.TSID.MetricID, mr.MetricNameRaw) {
 				// Skip row, since it exceeds cardinality limit
 				j--
 				continue
 			}
 			r.TSID = genTSID.TSID
+			// 设置为前一个
 			prevTSID = r.TSID
 			prevMetricNameRaw = mr.MetricNameRaw
 
+			// 找到的TSID不是当前代的索引（来自上一代缓存下来的索引）
 			if genTSID.generation < generation {
 				// The found TSID is from the previous indexdb. Create it in the current indexdb.
 				date := uint64(r.Timestamp) / msecPerDay
@@ -1940,8 +1950,11 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 				}
 				mn.sortTags()
 
+				// 创建所有索引类型
 				createAllIndexesForMetricName(is, mn, &genTSID.TSID, date)
+				// 如果填充成功，则将当前的 TSID 设置为当前代索引
 				genTSID.generation = generation
+				// 重新将该 TSID -> MetricNameRaw 数据放回缓存，方便后面的序列处理
 				s.putSeriesToCache(mr.MetricNameRaw, &genTSID, date)
 				seriesRepopulated++
 				slowInsertsCount++
@@ -2701,9 +2714,13 @@ type generationTSID struct {
 	generation uint64
 }
 
+// 该代码片段应该是用于检查从tsidCache中获取的数据是否与目标dst的大小相等。
 func (s *Storage) getTSIDFromCache(dst *generationTSID, metricName []byte) bool {
+	// 将dst转换为字节切片，并确保其长度为dst类型的大小。
 	buf := (*[unsafe.Sizeof(*dst)]byte)(unsafe.Pointer(dst))[:]
+	// 从tsidCache中使用metricName获取数据，并将其存储到buf中。
 	buf = s.tsidCache.Get(buf[:0], metricName)
+	// 检查返回的数据长度是否等于dst类型的大小。
 	return uintptr(len(buf)) == unsafe.Sizeof(*dst)
 }
 
