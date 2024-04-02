@@ -465,6 +465,7 @@ func mustUnmarshalMetricIDs(dst []uint64, src []byte) []uint64 {
 //
 // It returns false if the given metricName isn't found in the indexdb.
 func (is *indexSearch) getTSIDByMetricName(dst *generationTSID, metricName []byte, date uint64) bool {
+	// 当前索引表查找
 	if is.getTSIDByMetricNameNoExtDB(&dst.TSID, metricName, date) {
 		// Fast path - the TSID is found in the current indexdb.
 		dst.generation = is.db.generation
@@ -474,6 +475,7 @@ func (is *indexSearch) getTSIDByMetricName(dst *generationTSID, metricName []byt
 	// Slow path - search for the TSID in the previous indexdb
 	ok := false
 	deadline := is.deadline
+	// 之前的索引表查找
 	is.db.doExtDB(func(extDB *indexDB) {
 		is := extDB.getIndexSearch(0, 0, deadline)
 		ok = is.getTSIDByMetricNameNoExtDB(&dst.TSID, metricName, date)
@@ -1933,11 +1935,13 @@ func (db *indexDB) getTSIDsFromMetricIDs(qt *querytracer.Tracer, accountID, proj
 
 var tagFiltersKeyBufPool bytesutil.ByteBufferPool
 
+// TODO geng annotation
 func (is *indexSearch) getTSIDByMetricNameNoExtDB(dst *TSID, metricName []byte, date uint64) bool {
 	dmis := is.db.s.getDeletedMetricIDs()
 	ts := &is.ts
 	kb := &is.kb
 	// Do not use marshalCommonPrefix() here, since mn already contains (AccountID, ProjectID)
+	// 构建item搜索
 	kb.B = append(kb.B[:0], nsPrefixDateMetricNameToTSID)
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	kb.B = append(kb.B, metricName...)

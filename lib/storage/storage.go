@@ -1835,6 +1835,11 @@ func (s *Storage) RegisterMetricNames(qt *querytracer.Tracer, mrs []MetricRow) {
 	}
 }
 
+// 快速路径 - 当前 MetricRow 包含与前一 MetricRow 相同的指标名称，因此它们具有相同的 TSID，所以直接将当前对象的 TSID 设置成前一个 TSID，这是最快的方式。
+// 如果和前一个指标名称不一样，则去查看 genTSID 是否在缓存中（命中缓存）
+//
+//	如果命中缓存则 genTSID 中的 TSID 就是我们需要的，同时也将其设置为前一个 prevTSID。如果该 TSID 不是当代的索引（来自上一代缓存下来的索引），则需要尝试使用该 TSID 重新填充当代的索引数据。
+//	如果没有命中缓存，则属于慢速路径
 func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, precisionBits uint8) error {
 	// 当前使用的索引表
 	idb := s.idb()
@@ -1857,13 +1862,12 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 	var seriesRepopulated uint64
 
 	minTimestamp, maxTimestamp := s.tb.getMinMaxTimestamps()
-
+	// 带有第几代索引信息的 TSID 对象
 	var genTSID generationTSID
 
 	// Return only the first error, since it has no sense in returning all errors.
 	var firstWarn error
 
-	// 1.构造r.TSID
 	// 循环数据行，其实就是填充 rawRow 中的 TSID 数据
 	// 若跟prevMetricNameRaw相同，则使用pervTSID;
 	// 若cache中有metricNameRaw，则使用cache.TSID；
@@ -1919,6 +1923,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 			r.TSID = prevTSID
 			continue
 		}
+		// 判断 TSID 是否在缓存中（命中缓存）
 		if s.getTSIDFromCache(&genTSID, mr.MetricNameRaw) {
 			// Fast path - the TSID for the given mr.MetricNameRaw has been found in cache and isn't deleted.
 			// There is no need in checking whether r.TSID.MetricID is deleted, since tsidCache doesn't
@@ -2009,6 +2014,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 			continue
 		}
 
+		// 如果上面都没有找到，则生成TSID
 		// Slowest path - the TSID for the given mr.MetricNameRaw isn't found in indexdb. Create it.
 		generateTSID(&genTSID.TSID, mn)
 
@@ -2052,6 +2058,7 @@ func (s *Storage) add(rows []rawRow, dstMrs []*MetricRow, mrs []MetricRow, preci
 	if err != nil {
 		err = fmt.Errorf("cannot update per-date data: %w", err)
 	} else {
+		// TSID构造完毕，开始插入数据
 		s.tb.MustAddRows(rows)
 	}
 	if err != nil {
