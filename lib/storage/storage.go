@@ -288,6 +288,7 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 
 	s.startCurrHourMetricIDsUpdater()
 	s.startNextDayMetricIDsUpdater()
+	// 索引目录轮转
 	s.startRetentionWatcher()
 
 	return s
@@ -731,6 +732,7 @@ func (s *Storage) startRetentionWatcher() {
 	}()
 }
 
+// 当到达retentionPeriod时，发生目录的轮转，cur->pre，next->cur
 func (s *Storage) retentionWatcher() {
 	for {
 		d := s.nextRetentionSeconds()
@@ -812,7 +814,7 @@ func (s *Storage) mustRotateIndexDB(currentTime time.Time) {
 	idbCurr := s.idb()
 	s.idbCurr.Store(idbNext)
 
-	// Schedule data removal for idbPrev
+	// Schedule data removal for idbPrev， 删除pre indexdb
 	idbCurr.doExtDB(func(extDB *indexDB) {
 		extDB.scheduleToDrop()
 	})

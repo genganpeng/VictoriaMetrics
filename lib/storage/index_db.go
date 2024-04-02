@@ -109,7 +109,7 @@ type indexDB struct {
 	name string
 	// Table 表结构
 	tb *mergeset.Table
-	// 相当于之前的一个 indexDB
+	// 上一个使用的indexDB
 	extDB     *indexDB
 	extDBLock sync.Mutex
 
