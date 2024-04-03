@@ -110,6 +110,7 @@ type Table struct {
 	prepareBlock PrepareBlockCallback
 	isReadOnly   *atomic.Bool
 
+	// rawItems 是用于预处理 Items 的，是一个 rawItemsShards 对象。
 	// rawItems contains recently added items that haven't been converted to parts yet.
 	//
 	// rawItems are converted to inmemoryParts at least every pendingItemsFlushInterval or when rawItems becomes full.
@@ -155,6 +156,7 @@ type rawItemsShards struct {
 	shardIdx atomic.Uint32
 
 	// shards reduce lock contention when adding rows on multi-CPU systems.
+	// 在多 cpu 系统上添加 rows 数据时，shards 分片可以减少锁竞争
 	shards []rawItemsShard
 
 	ibsToFlushLock sync.Mutex
@@ -173,19 +175,28 @@ var rawItemsShardsPerTable = func() int {
 	return cpus * multiplier
 }()
 
+// 每个分片最大的Block数
 const maxBlocksPerShard = 256
 
+// 当在打开Table的时候就会调用该函数进行初始化
 func (riss *rawItemsShards) init() {
 	riss.shards = make([]rawItemsShard, rawItemsShardsPerTable)
 }
 
+// rawItemsShard 表示保存索引数据的一个分片，里面其实就是一个 inmemoryBlock 的内存块切片，
+// 每个分片最多有 256 个block，每个内存块占用 64KB 的容量，当每个分片中的block数量超过最大数量（256）
+// 会去将内存块数据刷新为 Part。
 func (riss *rawItemsShards) addItems(tb *Table, items [][]byte) {
 	shards := riss.shards
 	shardsLen := uint32(len(shards))
 	for len(items) > 0 {
+		// 获取下一个要处理的分片索引，并进行自增
 		n := riss.shardIdx.Add(1)
+		// 根据索引计算实际的分片索引
 		idx := n % shardsLen
+		// 将items添加到指定分片，返回剩余未处理的items和需要刷新的分片信息
 		tailItems, ibsToFlush := shards[idx].addItems(items)
+		// 将需要刷新的分片信息记录到存储桶中
 		riss.addIbsToFlush(tb, ibsToFlush)
 		items = tailItems
 	}
@@ -225,6 +236,7 @@ func (riss *rawItemsShards) updateFlushDeadline() {
 }
 
 type rawItemsShardNopad struct {
+	// 下次刷新的时间
 	flushDeadlineMs atomic.Int64
 
 	mu  sync.Mutex
@@ -249,28 +261,35 @@ func (ris *rawItemsShard) Len() int {
 	return n
 }
 
+// addItems 将一组项目添加到内存块中，如果内存块达到最大数量或者单个项目超过最大大小，则会刷新当前内存块并创建新的内存块。
 func (ris *rawItemsShard) addItems(items [][]byte) ([][]byte, []*inmemoryBlock) {
 	var ibsToFlush []*inmemoryBlock
 	var tailItems [][]byte
 
 	ris.mu.Lock()
 	ibs := ris.ibs
+	// 如果当前没有内存块，则创建一个新的内存块并更新刷新截止时间
 	if len(ibs) == 0 {
 		ibs = append(ibs, &inmemoryBlock{})
 		ris.updateFlushDeadline()
 		ris.ibs = ibs
 	}
+	// 获取当前最后一个内存块
 	ib := ibs[len(ibs)-1]
+	// 遍历所有待添加的项目
 	for i, item := range items {
+		// 尝试将item添加到当前内存块， 如果当前block满了则返回false
 		if ib.Add(item) {
 			continue
 		}
+		// 超过单个分片的最大块数，则准备刷新当前内存块，并为剩余项目创建新可用的内存块
 		if len(ibs) >= maxBlocksPerShard {
 			ibsToFlush = append(ibsToFlush, ibs...)
 			ibs = make([]*inmemoryBlock, 0, maxBlocksPerShard)
 			tailItems = items[i:]
 			break
 		}
+		// 创建一个新的内存block，并尝试将item添加到新块
 		ib = &inmemoryBlock{}
 		if ib.Add(item) {
 			ibs = append(ibs, ib)
@@ -382,6 +401,7 @@ func MustOpenTable(path string, flushCallback func(), prepareBlock PrepareBlockC
 	return tb
 }
 
+// 定时执行一些任务
 func (tb *Table) startBackgroundWorkers() {
 	// Start file parts mergers, so they could start merging unmerged parts if needed.
 	// There is no need in starting in-memory parts mergers, since there are no in-memory parts yet.
@@ -830,6 +850,9 @@ func (ris *rawItemsShard) appendBlocksToFlush(dst []*inmemoryBlock, currentTimeM
 	return dst
 }
 
+// 将内存中的块刷新到单个内存part
+// mergeRawItemsBlocks 函数将指定的内存块进行 merge 合并操作，一次合并最大的内存块数量为 15，
+// 然后在独立的 goroutine 中去进行合并操作，使用 createInmemoryPart 函数。
 func (tb *Table) flushBlocksToInmemoryParts(ibs []*inmemoryBlock, isFinal bool) {
 	if len(ibs) == 0 {
 		return

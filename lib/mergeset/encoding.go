@@ -59,6 +59,7 @@ func (ib *inmemoryBlock) Swap(i, j int) {
 	items[i], items[j] = items[j], items[i]
 }
 
+// 内存中的一个Block块结构
 type inmemoryBlock struct {
 	// commonPrefix contains common prefix for all the items stored in the inmemoryBlock
 	commonPrefix []byte

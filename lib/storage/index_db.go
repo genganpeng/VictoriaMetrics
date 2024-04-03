@@ -574,7 +574,7 @@ func (is *indexSearch) createGlobalIndexes(tsid *TSID, mn *MetricName) {
 type indexItems struct {
 	B     []byte
 	Items [][]byte
-	// 当前B的偏移量
+	// 当前item offset
 	start int
 }
 
